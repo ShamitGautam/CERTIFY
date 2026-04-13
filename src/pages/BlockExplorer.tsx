@@ -10,6 +10,15 @@ const BlockExplorer = () => {
   const [chain, setChain] = useState<Block[]>([]);
   const [valid, setValid] = useState(true);
 
+  useEffect(() => {
+    if (loading || !user || role !== "admin") {
+      return;
+    }
+
+    setChain(getAllCertificates());
+    verifyChainIntegrity().then(setValid);
+  }, [loading, user, role]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -20,11 +29,6 @@ const BlockExplorer = () => {
 
   if (!user) return <Navigate to="/auth" replace />;
   if (role !== "admin") return <Navigate to="/dashboard" replace />;
-
-  useEffect(() => {
-    setChain(getAllCertificates());
-    verifyChainIntegrity().then(setValid);
-  }, []);
 
   return (
     <div className="min-h-screen bg-background">

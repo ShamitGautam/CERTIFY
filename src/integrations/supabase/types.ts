@@ -119,6 +119,17 @@ export type Database = {
         }
         Returns: boolean
       }
+      submit_certificate_request: {
+        Args: {
+          p_certificate_title: string
+          p_course_name: string
+          p_date_completed: string
+          p_institution: string
+          p_organisation_name: string
+          p_student_name: string
+        }
+        Returns: Database["public"]["Tables"]["certificate_requests"]["Row"]
+      }
     }
     Enums: {
       app_role: "admin" | "student"

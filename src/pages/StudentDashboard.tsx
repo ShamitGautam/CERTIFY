@@ -10,6 +10,11 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Clock, CheckCircle, XCircle } from "lucide-react";
 
+type ErrorWithMessage = {
+  message?: string;
+  code?: string;
+};
+
 interface CertRequest {
   id: string;
   student_name: string;
@@ -47,6 +52,17 @@ const StudentDashboard = () => {
     if (!error && data) setRequests(data as CertRequest[]);
   };
 
+  const getErrorMessage = (error: unknown) => {
+    if (error instanceof Error) return error.message;
+    if (error && typeof error === "object" && "message" in error) {
+      const maybeError = error as ErrorWithMessage;
+      if (typeof maybeError.message === "string" && maybeError.message.trim()) {
+        return maybeError.message;
+      }
+    }
+    return "Something went wrong";
+  };
+
   useEffect(() => {
     fetchRequests();
   }, []);
@@ -56,22 +72,38 @@ const StudentDashboard = () => {
     if (!user) return;
     setLoading(true);
     try {
-      const { error } = await supabase.from("certificate_requests").insert({
-        student_id: user.id,
-        student_name: form.studentName,
-        certificate_title: form.certificateTitle,
-        organisation_name: form.organisationName,
-        course_name: form.courseName,
-        institution: form.institution,
-        date_completed: form.dateCompleted,
-      });
-      if (error) throw error;
+      const payload = {
+        p_student_name: form.studentName,
+        p_certificate_title: form.certificateTitle,
+        p_organisation_name: form.organisationName,
+        p_course_name: form.courseName,
+        p_institution: form.institution,
+        p_date_completed: form.dateCompleted,
+      };
+
+      const { error: rpcError } = await supabase.rpc("submit_certificate_request", payload);
+
+      if (rpcError?.code === "PGRST202") {
+        const { error: insertError } = await supabase.from("certificate_requests").insert({
+          student_id: user.id,
+          student_name: form.studentName,
+          certificate_title: form.certificateTitle,
+          organisation_name: form.organisationName,
+          course_name: form.courseName,
+          institution: form.institution,
+          date_completed: form.dateCompleted,
+        });
+        if (insertError) throw insertError;
+      } else if (rpcError) {
+        throw rpcError;
+      }
+
       toast.success("Certificate request submitted!");
       setShowForm(false);
       setForm({ studentName: "", certificateTitle: "", organisationName: "", courseName: "", institution: "", dateCompleted: "" });
       fetchRequests();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to submit request");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error) || "Failed to submit request");
     } finally {
       setLoading(false);
     }

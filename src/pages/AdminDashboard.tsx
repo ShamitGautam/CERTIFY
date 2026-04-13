@@ -40,6 +40,8 @@ const AdminDashboard = () => {
     if (!error && data) setRequests(data as CertRequest[]);
   };
 
+  const getErrorMessage = (error: unknown) => (error instanceof Error ? error.message : "Something went wrong");
+
   useEffect(() => {
     fetchRequests();
   }, []);
@@ -71,8 +73,8 @@ const AdminDashboard = () => {
       if (error) throw error;
       toast.success("Certificate approved and stored on blockchain!");
       fetchRequests();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to approve");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error) || "Failed to approve");
     } finally {
       setProcessingId(null);
     }
@@ -92,8 +94,8 @@ const AdminDashboard = () => {
       if (error) throw error;
       toast.success("Certificate request rejected.");
       fetchRequests();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to reject");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error) || "Failed to reject");
     } finally {
       setProcessingId(null);
     }

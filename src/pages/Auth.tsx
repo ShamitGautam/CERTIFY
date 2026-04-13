@@ -18,33 +18,57 @@ const Auth = () => {
     fullName: "",
   });
 
+  const getErrorMessage = (error: unknown) => (error instanceof Error ? error.message : "Something went wrong");
+
+  const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
+    let timeoutId: number | undefined;
+
+    const timeout = new Promise<T>((_, reject) => {
+      timeoutId = window.setTimeout(() => reject(new Error("Request timed out. Please try again.")), timeoutMs);
+    });
+
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
-          email: form.email,
-          password: form.password,
-          options: {
-            data: { full_name: form.fullName },
-          },
-        });
+        const { error } = await withTimeout(
+          supabase.auth.signUp({
+            email: form.email,
+            password: form.password,
+            options: {
+              data: { full_name: form.fullName },
+            },
+          }),
+          15000,
+        );
         if (error) throw error;
         toast.success("Account created! Check your email to confirm, or log in if auto-confirmed.");
         setIsSignUp(false);
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: form.email,
-          password: form.password,
-        });
+        const { error } = await withTimeout(
+          supabase.auth.signInWithPassword({
+            email: form.email,
+            password: form.password,
+          }),
+          15000,
+        );
         if (error) throw error;
         toast.success("Logged in successfully!");
         navigate("/dashboard");
       }
-    } catch (error: any) {
-      toast.error(error.message || "Authentication failed");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error) || "Authentication failed");
     } finally {
       setLoading(false);
     }
