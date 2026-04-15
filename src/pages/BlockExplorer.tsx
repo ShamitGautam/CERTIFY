@@ -2,8 +2,21 @@ import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import { useAuth } from "@/contexts/AuthContext";
-import { getAllCertificates, verifyChainIntegrity, type Block } from "@/lib/blockchain";
+import { supabase } from "@/integrations/supabase/client";
+import { getAllCertificates, type Block } from "@/lib/blockchain";
 import { CheckCircle, AlertTriangle, Blocks } from "lucide-react";
+
+interface CertificateRequestRow {
+  student_name: string;
+  certificate_title: string;
+  organisation_name: string;
+  course_name: string;
+  institution: string;
+  date_completed: string;
+  certificate_id: string | null;
+  block_hash: string | null;
+  created_at: string;
+}
 
 const BlockExplorer = () => {
   const { user, role, loading } = useAuth();
@@ -15,8 +28,50 @@ const BlockExplorer = () => {
       return;
     }
 
-    setChain(getAllCertificates());
-    verifyChainIntegrity().then(setValid);
+    let cancelled = false;
+
+    const loadChain = async () => {
+      const { data, error } = await supabase
+        .from("certificate_requests")
+        .select("student_name, certificate_title, organisation_name, course_name, institution, date_completed, certificate_id, block_hash, created_at")
+        .eq("status", "approved")
+        .not("block_hash", "is", null)
+        .order("created_at", { ascending: true });
+
+      if (!cancelled) {
+        if (error || !data || data.length === 0) {
+          const localChain = getAllCertificates();
+          setChain(localChain);
+          setValid(localChain.every((block, index, all) => index === 0 || block.previousHash === all[index - 1].hash));
+          return;
+        }
+
+        const dbBlocks: Block[] = (data as CertificateRequestRow[]).map((row, index, all) => ({
+          index,
+          timestamp: row.created_at,
+          data: {
+            studentName: row.student_name,
+            certificateTitle: row.certificate_title,
+            organisationName: row.organisation_name,
+            courseName: row.course_name,
+            institution: row.institution,
+            dateIssued: row.date_completed,
+            certificateId: row.certificate_id || "",
+          },
+          hash: row.block_hash || "",
+          previousHash: index === 0 ? "0" : all[index - 1].block_hash || "",
+        }));
+
+        setChain(dbBlocks);
+        setValid(dbBlocks.every((block, index, all) => index === 0 || block.previousHash === all[index - 1].hash));
+      }
+    };
+
+    void loadChain();
+
+    return () => {
+      cancelled = true;
+    };
   }, [loading, user, role]);
 
   if (loading) {

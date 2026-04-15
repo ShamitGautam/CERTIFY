@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { addCertificate, generateCertificateId } from "@/lib/blockchain";
-import { CheckCircle, XCircle, Clock, Shield } from "lucide-react";
+import { CheckCircle, XCircle, Clock, Shield, FileText } from "lucide-react";
 
 interface CertRequest {
   id: string;
@@ -24,6 +24,12 @@ interface CertRequest {
   block_hash: string | null;
   created_at: string;
 }
+
+type CertificateMeta = {
+  pdfName?: string;
+  pdfDataUrl?: string;
+  adminNote?: string;
+};
 
 const AdminDashboard = () => {
   const { signOut } = useAuth();
@@ -41,6 +47,58 @@ const AdminDashboard = () => {
   };
 
   const getErrorMessage = (error: unknown) => (error instanceof Error ? error.message : "Something went wrong");
+
+  const parseCertificateMeta = (value: string | null): CertificateMeta => {
+    if (!value) return {};
+
+    try {
+      const parsed = JSON.parse(value) as CertificateMeta;
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      return { adminNote: value };
+    }
+
+    return {};
+  };
+
+  const buildCertificateMeta = (existing: string | null, note: string): string => {
+    const current = parseCertificateMeta(existing);
+    return JSON.stringify({
+      pdfName: current.pdfName,
+      pdfDataUrl: current.pdfDataUrl,
+      adminNote: note || current.adminNote || "",
+    });
+  };
+
+  const openPdfInNewTab = (pdfDataUrl: string) => {
+    const [header, encodedData] = pdfDataUrl.split(",");
+
+    if (!encodedData) {
+      toast.error("Unable to open the uploaded PDF.");
+      return;
+    }
+
+    const mimeTypeMatch = header.match(/data:(.*?);base64/);
+    const mimeType = mimeTypeMatch?.[1] || "application/pdf";
+    const binaryString = window.atob(encodedData);
+    const binaryLength = binaryString.length;
+    const bytes = new Uint8Array(binaryLength);
+
+    for (let index = 0; index < binaryLength; index += 1) {
+      bytes[index] = binaryString.charCodeAt(index);
+    }
+
+    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+    const popup = window.open(blobUrl, "_blank", "noopener,noreferrer");
+
+    if (!popup) {
+      URL.revokeObjectURL(blobUrl);
+      toast.error("Popup blocked. Allow popups to view the PDF.");
+      return;
+    }
+
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  };
 
   useEffect(() => {
     fetchRequests();
@@ -66,7 +124,7 @@ const AdminDashboard = () => {
           status: "approved" as const,
           certificate_id: certId,
           block_hash: block.hash,
-          admin_notes: notes[req.id] || null,
+          admin_notes: buildCertificateMeta(req.admin_notes, notes[req.id] || ""),
         })
         .eq("id", req.id);
 
@@ -87,7 +145,7 @@ const AdminDashboard = () => {
         .from("certificate_requests")
         .update({
           status: "rejected" as const,
-          admin_notes: notes[req.id] || null,
+          admin_notes: buildCertificateMeta(req.admin_notes, notes[req.id] || ""),
         })
         .eq("id", req.id);
 
@@ -124,6 +182,8 @@ const AdminDashboard = () => {
     await signOut();
     navigate("/", { replace: true });
   };
+
+  const renderCertificateMeta = (value: string | null) => parseCertificateMeta(value);
 
   return (
     <div className="min-h-screen bg-background">
@@ -166,6 +226,29 @@ const AdminDashboard = () => {
                   <div><span className="text-muted-foreground">Completed:</span> <span className="text-foreground">{req.date_completed}</span></div>
                   <div><span className="text-muted-foreground">Submitted:</span> <span className="text-foreground">{new Date(req.created_at).toLocaleDateString()}</span></div>
                 </div>
+                {renderCertificateMeta(req.admin_notes).pdfDataUrl && (
+                  <div className="mb-4 rounded-lg border border-border bg-background/50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-primary" />
+                        <div>
+                          <p className="text-sm font-medium text-foreground">Uploaded PDF</p>
+                          <p className="text-xs text-muted-foreground">
+                            {renderCertificateMeta(req.admin_notes).pdfName || "Certificate PDF"}
+                          </p>
+                        </div>
+                      </div>
+                      <Button variant="outline" size="sm" type="button" onClick={() => openPdfInNewTab(renderCertificateMeta(req.admin_notes).pdfDataUrl!)}>
+                        Open PDF
+                      </Button>
+                    </div>
+                    <iframe
+                      title={`Certificate PDF for ${req.student_name}`}
+                      src={renderCertificateMeta(req.admin_notes).pdfDataUrl!}
+                      className="mt-4 h-[420px] w-full rounded-md border border-border bg-background"
+                    />
+                  </div>
+                )}
                 <Textarea
                   placeholder="Admin notes (optional)..."
                   value={notes[req.id] || ""}

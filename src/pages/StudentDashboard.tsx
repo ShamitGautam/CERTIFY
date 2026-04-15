@@ -8,11 +8,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Clock, CheckCircle, XCircle } from "lucide-react";
+import { Plus, Clock, CheckCircle, XCircle, FileText, Upload } from "lucide-react";
 
 type ErrorWithMessage = {
   message?: string;
   code?: string;
+};
+
+type CertificateMeta = {
+  pdfName?: string;
+  pdfDataUrl?: string;
 };
 
 interface CertRequest {
@@ -35,6 +40,7 @@ const StudentDashboard = () => {
   const [requests, setRequests] = useState<CertRequest[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [certificateFile, setCertificateFile] = useState<File | null>(null);
   const [form, setForm] = useState({
     studentName: "",
     certificateTitle: "",
@@ -63,6 +69,74 @@ const StudentDashboard = () => {
     return "Something went wrong";
   };
 
+  const parseCertificateMeta = (value: string | null): CertificateMeta => {
+    if (!value) return {};
+
+    try {
+      const parsed = JSON.parse(value) as CertificateMeta;
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      return {};
+    }
+
+    return {};
+  };
+
+  const buildCertificateMeta = (pdfName: string, pdfDataUrl: string) =>
+    JSON.stringify({ pdfName, pdfDataUrl });
+
+  const openPdfInNewTab = (pdfDataUrl: string) => {
+    const [header, encodedData] = pdfDataUrl.split(",");
+
+    if (!encodedData) {
+      toast.error("Unable to open the uploaded PDF.");
+      return;
+    }
+
+    const mimeTypeMatch = header.match(/data:(.*?);base64/);
+    const mimeType = mimeTypeMatch?.[1] || "application/pdf";
+    const binaryString = window.atob(encodedData);
+    const binaryLength = binaryString.length;
+    const bytes = new Uint8Array(binaryLength);
+
+    for (let index = 0; index < binaryLength; index += 1) {
+      bytes[index] = binaryString.charCodeAt(index);
+    }
+
+    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+    const popup = window.open(blobUrl, "_blank", "noopener,noreferrer");
+
+    if (!popup) {
+      URL.revokeObjectURL(blobUrl);
+      toast.error("Popup blocked. Allow popups to view the PDF.");
+      return;
+    }
+
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  };
+
+  const readCertificateFile = async () => {
+    if (!certificateFile) {
+      throw new Error("Please upload the certificate PDF before submitting.");
+    }
+
+    if (certificateFile.type !== "application/pdf") {
+      throw new Error("Only PDF files are allowed.");
+    }
+
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Failed to read the PDF file."));
+      reader.readAsDataURL(certificateFile);
+    });
+
+    return {
+      dataUrl,
+      name: certificateFile.name,
+    };
+  };
+
   useEffect(() => {
     fetchRequests();
   }, []);
@@ -72,35 +146,23 @@ const StudentDashboard = () => {
     if (!user) return;
     setLoading(true);
     try {
-      const payload = {
-        p_student_name: form.studentName,
-        p_certificate_title: form.certificateTitle,
-        p_organisation_name: form.organisationName,
-        p_course_name: form.courseName,
-        p_institution: form.institution,
-        p_date_completed: form.dateCompleted,
-      };
-
-      const { error: rpcError } = await supabase.rpc("submit_certificate_request", payload);
-
-      if (rpcError?.code === "PGRST202") {
-        const { error: insertError } = await supabase.from("certificate_requests").insert({
-          student_id: user.id,
-          student_name: form.studentName,
-          certificate_title: form.certificateTitle,
-          organisation_name: form.organisationName,
-          course_name: form.courseName,
-          institution: form.institution,
-          date_completed: form.dateCompleted,
-        });
-        if (insertError) throw insertError;
-      } else if (rpcError) {
-        throw rpcError;
-      }
+      const uploadedFile = await readCertificateFile();
+      const { error } = await supabase.from("certificate_requests").insert({
+        student_id: user.id,
+        student_name: form.studentName,
+        certificate_title: form.certificateTitle,
+        organisation_name: form.organisationName,
+        course_name: form.courseName,
+        institution: form.institution,
+        date_completed: form.dateCompleted,
+        admin_notes: buildCertificateMeta(uploadedFile.name, uploadedFile.dataUrl),
+      });
+      if (error) throw error;
 
       toast.success("Certificate request submitted!");
       setShowForm(false);
       setForm({ studentName: "", certificateTitle: "", organisationName: "", courseName: "", institution: "", dateCompleted: "" });
+      setCertificateFile(null);
       fetchRequests();
     } catch (error: unknown) {
       toast.error(getErrorMessage(error) || "Failed to submit request");
@@ -129,6 +191,8 @@ const StudentDashboard = () => {
     await signOut();
     navigate("/", { replace: true });
   };
+
+  const renderCertificateMeta = (value: string | null) => parseCertificateMeta(value);
 
   return (
     <div className="min-h-screen bg-background">
@@ -175,6 +239,25 @@ const StudentDashboard = () => {
                 <Label>Date Completed</Label>
                 <Input type="date" value={form.dateCompleted} onChange={(e) => setForm({ ...form, dateCompleted: e.target.value })} className="mt-1" required />
               </div>
+              <div className="md:col-span-2">
+                <Label htmlFor="certificateFile">Certificate PDF</Label>
+                <div className="mt-1 flex items-center gap-3">
+                  <Input
+                    id="certificateFile"
+                    type="file"
+                    accept="application/pdf"
+                    onChange={(e) => setCertificateFile(e.target.files?.[0] ?? null)}
+                    required
+                  />
+                  <Upload className="w-4 h-4 text-muted-foreground shrink-0" />
+                </div>
+                {certificateFile && (
+                  <p className="mt-2 text-xs text-muted-foreground flex items-center gap-2">
+                    <FileText className="w-3 h-3" />
+                    {certificateFile.name}
+                  </p>
+                )}
+              </div>
             </div>
             <div className="flex gap-3">
               <Button type="submit" disabled={loading}>{loading ? "Submitting..." : "Submit Request"}</Button>
@@ -209,6 +292,21 @@ const StudentDashboard = () => {
                   <div className="mt-3 pt-3 border-t border-border">
                     <span className="text-xs text-muted-foreground">Certificate ID: </span>
                     <code className="text-primary font-mono text-sm">{req.certificate_id}</code>
+                  </div>
+                )}
+                {renderCertificateMeta(req.admin_notes).pdfDataUrl && (
+                  <div className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-3">
+                    <div>
+                      <span className="text-xs text-muted-foreground">Uploaded PDF: </span>
+                      <span className="text-foreground text-sm">
+                        {renderCertificateMeta(req.admin_notes).pdfName || "Certificate PDF"}
+                      </span>
+                    </div>
+                    <Button variant="outline" size="sm" asChild>
+                      <button type="button" onClick={() => openPdfInNewTab(renderCertificateMeta(req.admin_notes).pdfDataUrl!)}>
+                        View PDF
+                      </button>
+                    </Button>
                   </div>
                 )}
               </div>
