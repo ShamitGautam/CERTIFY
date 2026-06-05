@@ -109,7 +109,6 @@ http://127.0.0.1:5000/
 * Decentralization (Simulated)
 
 
-
 ## Future Enhancements
 
 * QR code-based verification
